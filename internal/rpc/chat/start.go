@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"strings"
 	"time"
 
 	"github.com/openimsdk/chat/pkg/common/constant"
@@ -36,13 +35,17 @@ func Start(ctx context.Context, config *Config, client discovery.SvcDiscoveryReg
 	if len(config.Share.ChatAdmin) == 0 {
 		return errs.New("share chat admin not configured")
 	}
+	phoneMode, mailMode, err := resolveVerificationModes(config.RpcConfig.VerifyCode.Phone.Use, config.RpcConfig.VerifyCode.Mail.Use, false, config.RpcConfig.VerifyCode.SuperCode)
+	if err != nil {
+		return err
+	}
 	mgocli, err := mongoutil.NewMongoDB(ctx, config.MongodbConfig.Build())
 	if err != nil {
 		return err
 	}
 	var srv chatSvr
-	config.RpcConfig.VerifyCode.Phone.Use = strings.ToLower(config.RpcConfig.VerifyCode.Phone.Use)
-	config.RpcConfig.VerifyCode.Mail.Use = strings.ToLower(config.RpcConfig.VerifyCode.Mail.Use)
+	config.RpcConfig.VerifyCode.Phone.Use = phoneMode
+	config.RpcConfig.VerifyCode.Mail.Use = mailMode
 	srv.conf = config.RpcConfig.VerifyCode
 	switch config.RpcConfig.VerifyCode.Phone.Use {
 	case "ali":

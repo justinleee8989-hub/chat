@@ -11,10 +11,10 @@ verifyCode:
   validCount: 5
   uintTime: 86400
   maxCount: 10
-  superCode: "666666"
+  superCode: "" # Set explicitly only for local fixed-code testing.
   len: 6
   phone:
-    use: "superCode"  # superCode: user superCode; ali: use ali verify code;
+    use: "" # disabled by default; phone: ali/superCode, mail: mail/superCode
     ali:
       endpoint: ""
       accessKeyId: ""
@@ -22,7 +22,7 @@ verifyCode:
       signName: ""
       verificationCodeTemplateCode: ""
   mail:
-    use: "superCode"  # superCode: user superCode; mail: use mail verify code;
+    use: "" # disabled by default; phone: ali/superCode, mail: mail/superCode
     title: ""
     senderMail: ""
     senderAuthorizationCode: ""
