@@ -39,5 +39,12 @@ type VerifyCodeInterface interface {
 	RangeNum(ctx context.Context, account string, start time.Time, end time.Time) (int64, error)
 	TakeLast(ctx context.Context, account string) (*VerifyCode, error)
 	Incr(ctx context.Context, id string) error
+	TryIncrementAttempt(ctx context.Context, id string, limit int) (bool, error)
+	TryAcceptCode(ctx context.Context, id string, code string, limit int, nonce string) (bool, error)
 	Delete(ctx context.Context, id string) error
+}
+
+type VerifyCodeSendLimiterInterface interface {
+	Reserve(ctx context.Context, account string, now time.Time, window time.Duration, max int, reservationID string) (bool, error)
+	Release(ctx context.Context, account string, reservationID string) error
 }

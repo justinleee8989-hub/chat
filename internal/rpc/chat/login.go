@@ -2,7 +2,11 @@ package chat
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"encoding/hex"
 	"fmt"
+	"io"
+	"math/big"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -89,9 +93,6 @@ func (o *chatSvr) SendVerifyCode(ctx context.Context, req *chat.SendVerifyCodeRe
 	default:
 		return nil, errs.ErrArgs.WrapMsg("used unknown")
 	}
-	if o.SMS == nil && o.Mail == nil {
-		return &chat.SendVerifyCodeResp{}, nil // super code
-	}
 	if req.Email != "" {
 		switch o.conf.Mail.Use {
 		case constant.VerifySuperCode:
@@ -113,29 +114,38 @@ func (o *chatSvr) SendVerifyCode(ctx context.Context, req *chat.SendVerifyCodeRe
 	}
 
 	isEmail := req.Email != ""
+	code, err := randomNumericCode(o.Code.Len)
+	if err != nil {
+		return nil, errs.Wrap(err)
+	}
 	var (
-		code     = o.genVerifyCode()
 		account  string
 		sendCode func() error
 	)
 	if isEmail {
+		if o.Mail == nil {
+			return nil, errs.ErrInternalServer.WrapMsg("email verification code provider is not configured")
+		}
 		sendCode = func() error {
 			return o.Mail.SendMail(ctx, req.Email, code)
 		}
 		account = req.Email
 	} else {
+		if o.SMS == nil {
+			return nil, errs.ErrInternalServer.WrapMsg("phone verification code provider is not configured")
+		}
 		sendCode = func() error {
 			return o.SMS.SendCode(ctx, req.AreaCode, req.PhoneNumber, code)
 		}
 		account = o.verifyCodeJoin(req.AreaCode, req.PhoneNumber)
 	}
 	now := time.Now()
-	count, err := o.Database.CountVerifyCodeRange(ctx, account, now.Add(-o.Code.UintTime), now)
-	if err != nil {
-		return nil, err
+	if o.Code.MaxCount <= 0 || o.Code.MaxCount > 1000 || o.Code.UintTime <= 0 {
+		return nil, errs.ErrInternalServer.WrapMsg("verification code send limit is not configured correctly")
 	}
-	if o.Code.MaxCount < int(count) {
-		return nil, eerrs.ErrVerifyCodeSendFrequently.Wrap()
+	reservationID, err := randomReservationID()
+	if err != nil {
+		return nil, errs.Wrap(err)
 	}
 	platformName := constantpb.PlatformIDToName(int(req.Platform))
 	if platformName == "" {
@@ -150,10 +160,14 @@ func (o *chatSvr) SendVerifyCode(ctx context.Context, req *chat.SendVerifyCodeRe
 		Used:       false,
 		CreateTime: now,
 	}
-	if err := o.Database.AddVerifyCode(ctx, vc, sendCode); err != nil {
+	reserved, err := reserveAndSendVerifyCode(ctx, o.Database, vc, o.Code.UintTime, o.Code.MaxCount, reservationID, sendCode)
+	if err != nil {
 		return nil, err
 	}
-	log.ZDebug(ctx, "send code success", "account", account, "code", code, "platform", platformName)
+	if !reserved {
+		return nil, eerrs.ErrVerifyCodeSendFrequently.Wrap()
+	}
+	log.ZDebug(ctx, "send code success", "account", account, "platform", platformName)
 	return &chat.SendVerifyCodeResp{}, nil
 }
 
@@ -204,8 +218,24 @@ func (o *chatSvr) verifyCode(ctx context.Context, account string, verifyCode str
 			return last.ID, eerrs.ErrVerifyCodeMaxCount.Wrap()
 		}
 		if last.Code != verifyCode {
-			if err := o.Database.UpdateVerifyCodeIncrCount(ctx, last.ID); err != nil {
+			ok, err := o.Database.TryIncrementVerifyCodeAttempt(ctx, last.ID, n)
+			if err != nil {
 				return last.ID, err
+			}
+			if !ok {
+				return last.ID, eerrs.ErrVerifyCodeMaxCount.Wrap()
+			}
+		} else {
+			nonceBytes := make([]byte, 16)
+			if _, err := io.ReadFull(cryptorand.Reader, nonceBytes); err != nil {
+				return last.ID, errs.Wrap(err)
+			}
+			ok, err := o.Database.TryAcceptVerifyCode(ctx, last.ID, verifyCode, n, hex.EncodeToString(nonceBytes))
+			if err != nil {
+				return last.ID, err
+			}
+			if !ok {
+				return last.ID, eerrs.ErrVerifyCodeMaxCount.Wrap()
 			}
 		}
 	}
@@ -247,14 +277,35 @@ func (o *chatSvr) genUserID() string {
 	return string(data)
 }
 
-func (o *chatSvr) genVerifyCode() string {
-	data := make([]byte, o.Code.Len)
-	rand.Read(data)
-	chars := []byte("0123456789")
-	for i := 0; i < len(data); i++ {
-		data[i] = chars[data[i]%10]
+func randomNumericCode(length int) (string, error) {
+	if length < 1 || length > 32 {
+		return "", fmt.Errorf("invalid verification code length")
 	}
-	return string(data)
+	const digits = "0123456789"
+	code := make([]byte, length)
+	limit := big.NewInt(250) // largest multiple of ten below 256
+	for i := range code {
+		for {
+			n, err := cryptorand.Int(cryptorand.Reader, big.NewInt(256))
+			if err != nil {
+				return "", err
+			}
+			if n.Cmp(limit) >= 0 {
+				continue
+			}
+			code[i] = digits[n.Int64()%10]
+			break
+		}
+	}
+	return string(code), nil
+}
+
+func randomReservationID() (string, error) {
+	b := make([]byte, 16)
+	if _, err := io.ReadFull(cryptorand.Reader, b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
 }
 
 func (o *chatSvr) RegisterUser(ctx context.Context, req *chat.RegisterUserReq) (*chat.RegisterUserResp, error) {

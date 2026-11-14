@@ -2,21 +2,11 @@ package chat
 
 import (
 	"context"
-
-	"github.com/openimsdk/chat/pkg/common/mctx"
 	"github.com/openimsdk/chat/pkg/protocol/chat"
+	"github.com/openimsdk/tools/errs"
 )
 
+// All room credentials must pass through the authenticated RTC authority API.
 func (o *chatSvr) GetTokenForVideoMeeting(ctx context.Context, req *chat.GetTokenForVideoMeetingReq) (*chat.GetTokenForVideoMeetingResp, error) {
-	if _, _, err := mctx.Check(ctx); err != nil {
-		return nil, err
-	}
-	token, err := o.Livekit.GetLiveKitToken(req.Room, req.Identity)
-	if err != nil {
-		return nil, err
-	}
-	return &chat.GetTokenForVideoMeetingResp{
-		ServerUrl: o.Livekit.GetLiveKitURL(),
-		Token:     token,
-	}, err
+	return nil, errs.ErrNoPermission.WrapMsg("请使用经过房间授权的通话接口")
 }

@@ -70,10 +70,13 @@ func Start(ctx context.Context, index int, cfg *Config) error {
 		ChatAdminUserID: cfg.Share.ChatAdmin[0],
 	}
 	adminApi := New(chatClient, adminClient, im, &base)
+	if err := adminApi.initRTC(ctx, cfg.Share.OpenIM.ApiURL); err != nil {
+		return err
+	}
 	mwApi := chatmw.New(adminClient)
 	gin.SetMode(gin.ReleaseMode)
 	engine := gin.New()
-	engine.Use(gin.Recovery(), mw.CorsHandler(), mw.GinParseOperationID())
+	engine.Use(gin.Recovery(), mw.CorsHandler(), rtcWebhookOperationID, mw.GinParseOperationID())
 	SetChatRoute(engine, adminApi, mwApi)
 
 	var (
@@ -135,13 +138,17 @@ func SetChatRoute(router gin.IRouter, chat *Api, mw *chatmw.MW) {
 	account.POST("/password/change", mw.CheckToken, chat.ChangePassword) // Change password
 
 	user := router.Group("/user", mw.CheckToken)
-	user.POST("/update", chat.UpdateUserInfo)                 // Edit personal information
-	user.POST("/find/public", chat.FindUserPublicInfo)        // Get user's public information
-	user.POST("/find/full", chat.FindUserFullInfo)            // Get all information of the user
-	user.POST("/search/full", chat.SearchUserFullInfo)        // Search user's public information
-	user.POST("/search/public", chat.SearchUserPublicInfo)    // Search all information of the user
-	user.POST("/rtc/get_token", chat.GetTokenForVideoMeeting) // Get token for video meeting for the user
+	user.POST("/update", chat.UpdateUserInfo)              // Edit personal information
+	user.POST("/find/public", chat.FindUserPublicInfo)     // Get user's public information
+	user.POST("/find/full", chat.FindUserFullInfo)         // Get all information of the user
+	user.POST("/search/full", chat.SearchUserFullInfo)     // Search user's public information
+	user.POST("/search/public", chat.SearchUserPublicInfo) // Search all information of the user
+	user.POST("/rtc/get_token", chat.RTCToken)             // Get token for video meeting for the user
 
+	router.POST("/rtc/webhook", chat.RTCWebhook)
+	user.POST("/rtc/call", chat.RTCCall)
+	user.POST("/message/extras", chat.MessageExtras)
+	user.POST("/message/readers", chat.MessageReaders)
 	router.POST("/friend/search", mw.CheckToken, chat.SearchFriend)
 
 	router.Group("/applet").POST("/find", mw.CheckToken, chat.FindApplet) // Applet list

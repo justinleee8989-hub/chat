@@ -15,6 +15,7 @@
 package chat
 
 import (
+	"github.com/redis/go-redis/v9"
 	"io"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/openimsdk/chat/pkg/common/apistruct"
 	"github.com/openimsdk/chat/pkg/common/imapi"
 	"github.com/openimsdk/chat/pkg/common/mctx"
+	"github.com/openimsdk/chat/pkg/common/rtcauthority"
 	"github.com/openimsdk/chat/pkg/protocol/admin"
 	chatpb "github.com/openimsdk/chat/pkg/protocol/chat"
 	constantpb "github.com/openimsdk/protocol/constant"
@@ -44,6 +46,9 @@ func New(chatClient chatpb.ChatClient, adminClient admin.AdminClient, imApiCalle
 }
 
 type Api struct {
+	extrasRedis  *redis.Client
+	extrasIMURL  string
+	rtcAuthority *rtcauthority.Service
 	*util.Api
 	chatClient  chatpb.ChatClient
 	adminClient admin.AdminClient

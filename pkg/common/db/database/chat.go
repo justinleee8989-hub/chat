@@ -47,6 +47,10 @@ type ChatDatabaseInterface interface {
 	CountVerifyCodeRange(ctx context.Context, account string, start time.Time, end time.Time) (int64, error)
 	AddVerifyCode(ctx context.Context, verifyCode *chatdb.VerifyCode, fn func() error) error
 	UpdateVerifyCodeIncrCount(ctx context.Context, id string) error
+	TryIncrementVerifyCodeAttempt(ctx context.Context, id string, limit int) (bool, error)
+	TryAcceptVerifyCode(ctx context.Context, id string, code string, limit int, nonce string) (bool, error)
+	ReserveVerifyCodeSend(ctx context.Context, account string, now time.Time, window time.Duration, max int, reservationID string) (bool, error)
+	ReleaseVerifyCodeSend(ctx context.Context, account string, reservationID string) error
 	DelVerifyCode(ctx context.Context, id string) error
 	RegisterUser(ctx context.Context, register *chatdb.Register, account *chatdb.Account, attribute *chatdb.Attribute, credentials []*chatdb.Credential) error
 	LoginRecord(ctx context.Context, record *chatdb.UserLoginRecord, verifyCodeID *string) error
@@ -83,31 +87,37 @@ func NewChatDatabase(cli *mongoutil.Client) (ChatDatabaseInterface, error) {
 	if err != nil {
 		return nil, err
 	}
+	verifyCodeSendLimiter, err := chat.NewVerifyCodeSendLimiter(cli.GetDB())
+	if err != nil {
+		return nil, err
+	}
 	forbiddenAccount, err := admindb.NewForbiddenAccount(cli.GetDB())
 	if err != nil {
 		return nil, err
 	}
 	return &ChatDatabase{
-		tx:               cli.GetTx(),
-		register:         register,
-		account:          account,
-		attribute:        attribute,
-		credential:       credential,
-		userLoginRecord:  userLoginRecord,
-		verifyCode:       verifyCode,
-		forbiddenAccount: forbiddenAccount,
+		tx:                    cli.GetTx(),
+		register:              register,
+		account:               account,
+		attribute:             attribute,
+		credential:            credential,
+		userLoginRecord:       userLoginRecord,
+		verifyCode:            verifyCode,
+		verifyCodeSendLimiter: verifyCodeSendLimiter,
+		forbiddenAccount:      forbiddenAccount,
 	}, nil
 }
 
 type ChatDatabase struct {
-	tx               tx.Tx
-	register         chatdb.RegisterInterface
-	account          chatdb.AccountInterface
-	attribute        chatdb.AttributeInterface
-	credential       chatdb.CredentialInterface
-	userLoginRecord  chatdb.UserLoginRecordInterface
-	verifyCode       chatdb.VerifyCodeInterface
-	forbiddenAccount admin.ForbiddenAccountInterface
+	tx                    tx.Tx
+	register              chatdb.RegisterInterface
+	account               chatdb.AccountInterface
+	attribute             chatdb.AttributeInterface
+	credential            chatdb.CredentialInterface
+	userLoginRecord       chatdb.UserLoginRecordInterface
+	verifyCode            chatdb.VerifyCodeInterface
+	verifyCodeSendLimiter chatdb.VerifyCodeSendLimiterInterface
+	forbiddenAccount      admin.ForbiddenAccountInterface
 }
 
 func (o *ChatDatabase) GetUser(ctx context.Context, userID string) (account *chatdb.Account, err error) {
@@ -208,6 +218,22 @@ func (o *ChatDatabase) AddVerifyCode(ctx context.Context, verifyCode *chatdb.Ver
 
 func (o *ChatDatabase) UpdateVerifyCodeIncrCount(ctx context.Context, id string) error {
 	return o.verifyCode.Incr(ctx, id)
+}
+
+func (o *ChatDatabase) TryIncrementVerifyCodeAttempt(ctx context.Context, id string, limit int) (bool, error) {
+	return o.verifyCode.TryIncrementAttempt(ctx, id, limit)
+}
+
+func (o *ChatDatabase) TryAcceptVerifyCode(ctx context.Context, id string, code string, limit int, nonce string) (bool, error) {
+	return o.verifyCode.TryAcceptCode(ctx, id, code, limit, nonce)
+}
+
+func (o *ChatDatabase) ReserveVerifyCodeSend(ctx context.Context, account string, now time.Time, window time.Duration, max int, reservationID string) (bool, error) {
+	return o.verifyCodeSendLimiter.Reserve(ctx, account, now, window, max, reservationID)
+}
+
+func (o *ChatDatabase) ReleaseVerifyCodeSend(ctx context.Context, account string, reservationID string) error {
+	return o.verifyCodeSendLimiter.Release(ctx, account, reservationID)
 }
 
 func (o *ChatDatabase) DelVerifyCode(ctx context.Context, id string) error {
