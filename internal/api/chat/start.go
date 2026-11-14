@@ -148,6 +148,7 @@ func SetChatRoute(router gin.IRouter, chat *Api, mw *chatmw.MW) {
 	router.POST("/rtc/webhook", chat.RTCWebhook)
 	user.POST("/rtc/call", chat.RTCCall)
 	user.POST("/message/extras", chat.MessageExtras)
+	user.POST("/message/history", chat.MessageHistory)
 	user.POST("/message/readers", chat.MessageReaders)
 	router.POST("/friend/search", mw.CheckToken, chat.SearchFriend)
 
