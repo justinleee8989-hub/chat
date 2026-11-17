@@ -1,0 +1,1 @@
+{"checks":[{"path":"/user/message/extras","rejected":true,"errCode":1001},{"path":"/user/message/readers","rejected":true,"errCode":1001},{"path":"/user/rtc/call","rejected":true,"errCode":1001}]}

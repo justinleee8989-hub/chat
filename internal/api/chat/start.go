@@ -141,6 +141,7 @@ func SetChatRoute(router gin.IRouter, chat *Api, mw *chatmw.MW) {
 	user.POST("/update", chat.UpdateUserInfo)              // Edit personal information
 	user.POST("/find/public", chat.FindUserPublicInfo)     // Get user's public information
 	user.POST("/find/full", chat.FindUserFullInfo)         // Get all information of the user
+	user.POST("/self", chat.FindSelfProfile)               // Get the authenticated user profile
 	user.POST("/search/full", chat.SearchUserFullInfo)     // Search user's public information
 	user.POST("/search/public", chat.SearchUserPublicInfo) // Search all information of the user
 	user.POST("/rtc/get_token", chat.RTCToken)             // Get token for video meeting for the user

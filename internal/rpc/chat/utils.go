@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/openimsdk/chat/pkg/common/constant"
 	"github.com/openimsdk/chat/pkg/common/db/dbutil"
 	table "github.com/openimsdk/chat/pkg/common/db/table/chat"
 	"github.com/openimsdk/chat/pkg/eerrs"
@@ -111,4 +112,29 @@ func (o *chatSvr) checkRegisterInfo(ctx context.Context, user *chat.RegisterUser
 		}
 	}
 	return nil
+}
+
+// redactFullInfoEmails keeps full profile email private for ordinary users while
+// retaining existing admin access.
+func redactFullInfoEmails(actor string, userType int32, users []*common.UserFullInfo) {
+	if userType == constant.AdminUser {
+		return
+	}
+	for _, user := range users {
+		if user != nil && user.UserID != actor {
+			user.Email = ""
+		}
+	}
+}
+
+// redactPublicInfoEmails hides other users' email addresses from non-admin callers.
+func redactPublicInfoEmails(actor string, userType int32, users []*common.UserPublicInfo) {
+	if userType == constant.AdminUser {
+		return
+	}
+	for _, user := range users {
+		if user != nil && user.UserID != actor {
+			user.Email = ""
+		}
+	}
 }

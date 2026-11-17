@@ -21,6 +21,7 @@ type StateRepository interface {
 }
 
 type Service struct {
+	SendRecord                          func(context.Context, TerminalRecord) error
 	Store                               StateRepository
 	Key, Secret, PublicURL, InternalURL string
 	GroupMember                         func(context.Context, string, string) error
@@ -75,7 +76,7 @@ func (s *Service) Execute(ctx context.Context, user string, req Request) ([]*Cal
 	// Membership is fetched from OpenIM, never from client-supplied participant lists.
 	if req.Action == "join" || req.Action == "heartbeat" {
 		var group string
-		err := s.Store.Update(ctx, func(st *State) error {
+		err := s.view(ctx, func(st *State) error {
 			if c := st.Calls[req.Room]; c != nil {
 				group = c.GroupID
 			}
@@ -123,6 +124,7 @@ func (s *Service) Execute(ctx context.Context, user string, req Request) ([]*Cal
 				return err
 			}
 			c.RequestID = req.RequestID
+			c.ServerRecordDelivery = s.SendRecord != nil && c.GroupID == ""
 			result = []*Call{c}
 			return nil
 		}
@@ -169,7 +171,7 @@ func (s *Service) Authorized(ctx context.Context, room, user string) error {
 }
 func (s *Service) AuthorizedMedia(ctx context.Context, room, identity string) error {
 	var user string
-	err := s.Store.Update(ctx, func(st *State) error {
+	err := s.view(ctx, func(st *State) error {
 		c := st.Calls[room]
 		if c == nil {
 			return ErrPermission
@@ -198,4 +200,13 @@ func (s *Service) Token(ctx context.Context, room, user string) (string, error) 
 		return "", err
 	}
 	return auth.NewAccessToken(s.Key, s.Secret).SetIdentity(identity).SetName(user).SetValidFor(30 * time.Second).AddGrant(&auth.VideoGrant{RoomJoin: true, Room: room}).ToJWT()
+}
+
+func (s *Service) view(ctx context.Context, read func(*State) error) error {
+	if repo, ok := s.Store.(interface {
+		View(context.Context, func(*State) error) error
+	}); ok {
+		return repo.View(ctx, read)
+	}
+	return s.Store.Update(ctx, read)
 }

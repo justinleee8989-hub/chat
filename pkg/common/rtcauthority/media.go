@@ -66,18 +66,9 @@ func (s *Service) Webhook(w http.ResponseWriter, r *http.Request) {
 			if c == nil || c.Terminal() {
 				return nil
 			}
-			m := c.Members[c.UserForIdentity(identity)]
-			if m == nil {
-				return nil
-			}
-			if event.Event == "participant_joined" && event.CreatedAt >= m.JoinedAt {
-				m.SID = event.Participant.Sid
-				m.JoinedAt = event.CreatedAt
-				m.LeftAt = 0
-			}
-			if event.Event == "participant_left" && m.SID == event.Participant.Sid && event.CreatedAt >= m.JoinedAt && m.LeftAt == 0 {
-				m.LeftAt = time.Now().UnixMilli()
-			}
+			now := time.Now().UnixMilli()
+			st.Sweep(now)
+			c.mediaEvent(event.Event, identity, event.Participant.Sid, event.CreatedAt, now)
 			return nil
 		})
 		if err != nil {
@@ -88,6 +79,7 @@ func (s *Service) Webhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(200)
 }
 func (s *Service) Run(ctx context.Context) {
+	go s.runRecords(ctx)
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	var last []*Call
