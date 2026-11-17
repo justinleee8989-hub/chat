@@ -17,6 +17,7 @@ package chat
 import (
 	"github.com/redis/go-redis/v9"
 	"io"
+	"sync"
 	"time"
 
 	"github.com/openimsdk/chat/internal/api/util"
@@ -49,6 +50,9 @@ type Api struct {
 	extrasRedis  *redis.Client
 	extrasIMURL  string
 	rtcAuthority *rtcauthority.Service
+	// Group read progress push (group_read_webhook.go); the limiter is replaced in tests.
+	groupReadLimiter      groupReadLimiter
+	groupReadDisabledOnce sync.Once
 	*util.Api
 	chatClient  chatpb.ChatClient
 	adminClient admin.AdminClient

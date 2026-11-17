@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"os"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -15,6 +13,7 @@ import (
 	"github.com/openimsdk/chat/pkg/common/mctx"
 	"github.com/openimsdk/protocol/sdkws"
 	"github.com/openimsdk/tools/log"
+	"github.com/redis/go-redis/v9"
 )
 
 // OpenIM moves a group member's read position without telling anyone else, so a
@@ -30,13 +29,15 @@ import (
 //
 // and posts to <url>/<callbackCommand>. Without OPENIM_WEBHOOK_SECRET the route
 // answers 404. The read webhook needs OpenIM to send conversationID, groupID and
-// hasReadSeq (open-im-server feat/group-read-webhook-context).
+// hasReadSeq (open-im-server feat/group-read-webhook-context), and message extras
+// enabled here (MESSAGE_EXTRAS_ENABLED, or RTC): that is what sets the OpenIM API
+// URL and the Redis this uses, as /user/message/readers does.
 const (
-	groupReadWebhookCommand   = "callbackAfterGroupMsgReadCommand"
-	groupReadNotificationKey  = "group_read_progress"
-	groupReadLookback         = 20
-	groupReadThrottleInterval = time.Second
-	groupReadThrottleMaxKeys  = 10000
+	groupReadWebhookCommand    = "callbackAfterGroupMsgReadCommand"
+	groupReadNotificationKey   = "group_read_progress"
+	groupReadLookback          = 20
+	groupReadThrottleInterval  = time.Second
+	groupReadThrottleKeyPrefix = "chat:group_read_notify:"
 )
 
 type groupReadWebhookReq struct {
@@ -64,35 +65,25 @@ type businessNotificationReq struct {
 
 type businessNotificationResp struct{}
 
-// groupReadThrottle lets one notification per conversation and sender through
+// groupReadLimiter lets one notification per conversation and sender through
 // each interval: a member scrolling through a busy group moves their read
-// position many times a second.
-type groupReadThrottle struct {
-	mu   sync.Mutex
-	last map[string]time.Time
+// position many times a second. Kept in Redis so every chat-api instance shares it.
+type groupReadLimiter interface {
+	allow(ctx context.Context, key string) (bool, error)
 }
 
-func (t *groupReadThrottle) allow(key string, now time.Time) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if t.last == nil {
-		t.last = map[string]time.Time{}
-	}
-	if at, ok := t.last[key]; ok && now.Sub(at) < groupReadThrottleInterval {
-		return false
-	}
-	if len(t.last) >= groupReadThrottleMaxKeys {
-		for k, at := range t.last {
-			if now.Sub(at) >= groupReadThrottleInterval {
-				delete(t.last, k)
-			}
-		}
-	}
-	t.last[key] = now
-	return true
+type redisGroupReadLimiter struct{ rdb *redis.Client }
+
+func (l redisGroupReadLimiter) allow(ctx context.Context, key string) (bool, error) {
+	return l.rdb.SetNX(ctx, groupReadThrottleKeyPrefix+key, 1, groupReadThrottleInterval).Result()
 }
 
-var groupReadNotifications groupReadThrottle
+func (o *Api) groupReadLimit() groupReadLimiter {
+	if o.groupReadLimiter != nil {
+		return o.groupReadLimiter
+	}
+	return redisGroupReadLimiter{rdb: o.extrasRedis}
+}
 
 func openIMWebhookAuthorized(given string) bool {
 	secret := os.Getenv("OPENIM_WEBHOOK_SECRET")
@@ -108,14 +99,20 @@ func (o *Api) OpenIMWebhook(c *gin.Context) {
 	// Every enabled OpenIM after-webhook lands here; only the group read one is used.
 	var req groupReadWebhookReq
 	if c.Param("command") == groupReadWebhookCommand && c.ShouldBindJSON(&req) == nil && validGroupRead(req) {
-		// Answered at once: OpenIM queues its after-webhooks and waits for each.
-		go func() {
-			ctx, cancel := context.WithTimeout(rtcOperationContext(context.Background()), 10*time.Second)
-			defer cancel()
-			if err := o.notifyGroupReadProgress(ctx, req, time.Now()); err != nil {
-				log.ZWarn(ctx, "group read notification failed", err, "conversationID", req.ConversationID)
-			}
-		}()
+		if o.extrasIMURL == "" || o.extrasRedis == nil {
+			o.groupReadDisabledOnce.Do(func() {
+				log.ZWarn(c, "group read webhook received but message extras are disabled; no read progress is pushed", nil)
+			})
+		} else {
+			// Answered at once: OpenIM queues its after-webhooks and waits for each.
+			go func() {
+				ctx, cancel := context.WithTimeout(rtcOperationContext(context.Background()), 10*time.Second)
+				defer cancel()
+				if err := o.notifyGroupReadProgress(ctx, req); err != nil {
+					log.ZWarn(ctx, "group read notification failed", err, "conversationID", req.ConversationID)
+				}
+			}()
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"actionCode": 0, "errCode": 0, "errMsg": "", "errDlt": "", "nextCode": 0})
 }
@@ -127,10 +124,7 @@ func validGroupRead(req groupReadWebhookReq) bool {
 
 // notifyGroupReadProgress tells the senders of the last messages up to the new
 // read position that it moved.
-func (o *Api) notifyGroupReadProgress(ctx context.Context, req groupReadWebhookReq, now time.Time) error {
-	if o.extrasIMURL == "" {
-		return nil
-	}
+func (o *Api) notifyGroupReadProgress(ctx context.Context, req groupReadWebhookReq) error {
 	token, err := o.imApiCaller.ImAdminTokenWithDefaultAdmin(ctx)
 	if err != nil {
 		return err
@@ -157,14 +151,19 @@ func (o *Api) notifyGroupReadProgress(ctx context.Context, req groupReadWebhookR
 		return err
 	}
 	var firstErr error
+	limit := o.groupReadLimit()
 	for sender := range senders {
-		if !groupReadNotifications.allow(req.ConversationID+"\x00"+sender, now) {
+		allowed, err := limit.allow(ctx, req.ConversationID+":"+sender)
+		if err != nil {
+			// A Redis hiccup costs at most a duplicate notice, never a missed one.
+			log.ZWarn(ctx, "group read throttle unavailable", err, "conversationID", req.ConversationID)
+		} else if !allowed {
 			continue
 		}
-		_, err := imapi.NewApiCaller[businessNotificationReq, businessNotificationResp]("/msg/send_business_notification").Call(ctx, o.extrasIMURL, &businessNotificationReq{
+		_, err = imapi.NewApiCaller[businessNotificationReq, businessNotificationResp]("/msg/send_business_notification").Call(ctx, o.extrasIMURL, &businessNotificationReq{
 			Key:        groupReadNotificationKey,
 			Data:       string(data),
-			SendUserID: o.notificationSenderID(),
+			SendUserID: o.ImUserID,
 			RecvUserID: sender,
 			// Online only: a client that is not watching reads the count when it opens the chat.
 			ReliabilityLevel: 1,
@@ -174,11 +173,4 @@ func (o *Api) notifyGroupReadProgress(ctx context.Context, req groupReadWebhookR
 		}
 	}
 	return firstErr
-}
-
-func (o *Api) notificationSenderID() string {
-	if o.Api != nil && strings.TrimSpace(o.ImUserID) != "" {
-		return o.ImUserID
-	}
-	return "imAdmin"
 }

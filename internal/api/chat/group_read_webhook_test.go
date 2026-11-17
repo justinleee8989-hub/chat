@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,8 +13,48 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/openimsdk/chat/internal/api/util"
 	"github.com/openimsdk/protocol/sdkws"
+	"github.com/redis/go-redis/v9"
 )
+
+// memoryGroupReadLimiter stands in for Redis: one notice per key until reset.
+type memoryGroupReadLimiter struct {
+	mu   sync.Mutex
+	seen map[string]bool
+	err  error
+}
+
+func (l *memoryGroupReadLimiter) allow(_ context.Context, key string) (bool, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.err != nil {
+		return false, l.err
+	}
+	if l.seen == nil {
+		l.seen = map[string]bool{}
+	}
+	if l.seen[key] {
+		return false, nil
+	}
+	l.seen[key] = true
+	return true, nil
+}
+
+func (l *memoryGroupReadLimiter) reset() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.seen = nil
+}
+
+func groupReadTestAPI(imURL string, limiter groupReadLimiter) *Api {
+	return &Api{
+		Api:              &util.Api{ImUserID: "imAdmin"},
+		extrasIMURL:      imURL,
+		imApiCaller:      testMessageExtrasCaller{},
+		groupReadLimiter: limiter,
+	}
+}
 
 type recordedNotification struct {
 	businessNotificationReq
@@ -60,7 +101,6 @@ func groupReadIMServer(t *testing.T, msgs []*sdkws.MsgData) (*httptest.Server, f
 }
 
 func TestGroupReadNotifiesSendersOfReadMessagesOnly(t *testing.T) {
-	groupReadNotifications = groupReadThrottle{}
 	server, sent := groupReadIMServer(t, []*sdkws.MsgData{
 		{SendID: "alice", GroupID: "g1", Seq: 8, ContentType: 101, Status: 2},
 		{SendID: "alice", GroupID: "g1", Seq: 9, ContentType: 101, Status: 2},
@@ -69,14 +109,14 @@ func TestGroupReadNotifiesSendersOfReadMessagesOnly(t *testing.T) {
 		{SendID: "system", GroupID: "g1", Seq: 12, ContentType: 1501, Status: 2}, // a notification
 		{SendID: "carol", GroupID: "g1", Seq: 13, ContentType: 101, Status: 4},   // deleted
 	})
-	api := &Api{extrasIMURL: server.URL, imApiCaller: testMessageExtrasCaller{}}
-	err := api.notifyGroupReadProgress(context.Background(), groupReadWebhookReq{SendID: "reader", ConversationID: "sg_g1", GroupID: "g1", HasReadSeq: 13}, time.Now())
+	api := groupReadTestAPI(server.URL, &memoryGroupReadLimiter{})
+	err := api.notifyGroupReadProgress(context.Background(), groupReadWebhookReq{SendID: "reader", ConversationID: "sg_g1", GroupID: "g1", HasReadSeq: 13})
 	if err != nil {
 		t.Fatal(err)
 	}
 	got := map[string]groupReadNotice{}
 	for _, n := range sent() {
-		if n.Key != groupReadNotificationKey || n.ReliabilityLevel != 1 || n.SendMsg {
+		if n.Key != groupReadNotificationKey || n.ReliabilityLevel != 1 || n.SendMsg || n.SendUserID != "imAdmin" {
 			t.Fatalf("notification %+v", n.businessNotificationReq)
 		}
 		got[n.RecvUserID] = n.notice
@@ -87,18 +127,43 @@ func TestGroupReadNotifiesSendersOfReadMessagesOnly(t *testing.T) {
 }
 
 func TestGroupReadThrottlesEachSenderPerConversation(t *testing.T) {
-	groupReadNotifications = groupReadThrottle{}
 	server, sent := groupReadIMServer(t, []*sdkws.MsgData{{SendID: "alice", GroupID: "g1", Seq: 5, ContentType: 101, Status: 2}})
-	api := &Api{extrasIMURL: server.URL, imApiCaller: testMessageExtrasCaller{}}
-	now := time.Now()
+	limiter := &memoryGroupReadLimiter{}
+	api := groupReadTestAPI(server.URL, limiter)
 	req := groupReadWebhookReq{SendID: "reader", ConversationID: "sg_g1", GroupID: "g1", HasReadSeq: 5}
-	for _, at := range []time.Time{now, now.Add(300 * time.Millisecond), now.Add(groupReadThrottleInterval + time.Millisecond)} {
-		if err := api.notifyGroupReadProgress(context.Background(), req, at); err != nil {
+	for i := 0; i < 2; i++ {
+		if err := api.notifyGroupReadProgress(context.Background(), req); err != nil {
 			t.Fatal(err)
 		}
 	}
+	if n := len(sent()); n != 1 {
+		t.Fatalf("sent %d notifications within the interval, want 1", n)
+	}
+	limiter.reset() // the Redis key expired
+	if err := api.notifyGroupReadProgress(context.Background(), req); err != nil {
+		t.Fatal(err)
+	}
 	if n := len(sent()); n != 2 {
-		t.Fatalf("sent %d notifications, want 2", n)
+		t.Fatalf("sent %d notifications after the interval, want 2", n)
+	}
+}
+
+func TestGroupReadStillNotifiesWhenTheThrottleFails(t *testing.T) {
+	server, sent := groupReadIMServer(t, []*sdkws.MsgData{{SendID: "alice", GroupID: "g1", Seq: 5, ContentType: 101, Status: 2}})
+	api := groupReadTestAPI(server.URL, &memoryGroupReadLimiter{err: errors.New("redis down")})
+	if err := api.notifyGroupReadProgress(context.Background(), groupReadWebhookReq{SendID: "reader", ConversationID: "sg_g1", GroupID: "g1", HasReadSeq: 5}); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(sent()); n != 1 {
+		t.Fatalf("sent %d notifications, want 1", n)
+	}
+}
+
+func TestGroupReadThrottleUsesRedisWithExpiry(t *testing.T) {
+	limiter := redisGroupReadLimiter{rdb: redis.NewClient(&redis.Options{Addr: "127.0.0.1:1", MaxRetries: -1, DialTimeout: 50 * time.Millisecond})}
+	defer limiter.rdb.Close()
+	if _, err := limiter.allow(context.Background(), "sg_g1:alice"); err == nil {
+		t.Fatal("an unreachable Redis must report an error, not allow or deny silently")
 	}
 }
 
@@ -107,6 +172,7 @@ func TestOpenIMWebhookRequiresSecretAndIgnoresOtherCommands(t *testing.T) {
 	t.Setenv("OPENIM_WEBHOOK_SECRET", "s3cret")
 	router := gin.New()
 	router.POST("/callback/openim_webhook/:secret/:command", (&Api{}).OpenIMWebhook)
+	// With message extras disabled (no IM URL, no Redis) a valid read is acknowledged and dropped.
 	post := func(path, body string) int {
 		w := httptest.NewRecorder()
 		router.ServeHTTP(w, httptest.NewRequest(http.MethodPost, path, strings.NewReader(body)))
@@ -118,7 +184,10 @@ func TestOpenIMWebhookRequiresSecretAndIgnoresOtherCommands(t *testing.T) {
 	if code := post("/callback/openim_webhook/s3cret/callbackAfterSendGroupMsgCommand", `{}`); code != http.StatusOK {
 		t.Fatalf("other command answered %d", code)
 	}
-	// Invalid payloads are acknowledged but not processed (extrasIMURL is empty, so nothing could be sent anyway).
+	if code := post("/callback/openim_webhook/s3cret/"+groupReadWebhookCommand, `{"sendID":"r","conversationID":"sg_g1","groupID":"g1","hasReadSeq":3}`); code != http.StatusOK {
+		t.Fatalf("read with extras disabled answered %d", code)
+	}
+	// Invalid payloads are acknowledged but not processed.
 	if code := post("/callback/openim_webhook/s3cret/"+groupReadWebhookCommand, `{"sendID":"r","conversationID":"sg_other","groupID":"g1","hasReadSeq":3}`); code != http.StatusOK {
 		t.Fatalf("mismatched conversation answered %d", code)
 	}
