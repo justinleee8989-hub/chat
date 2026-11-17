@@ -161,4 +161,6 @@ func SetChatRoute(router gin.IRouter, chat *Api, mw *chatmw.MW) {
 	applicationGroup.POST("/page_versions", chat.PageApplicationVersion)
 
 	router.Group("/callback").POST("/open_im", chat.OpenIMCallback) // Callback
+	// OpenIM after-webhooks, secured by the secret in the path (group_read_webhook.go).
+	router.POST("/callback/openim_webhook/:secret/:command", chat.OpenIMWebhook)
 }
