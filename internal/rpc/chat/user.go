@@ -192,6 +192,10 @@ func (o *chatSvr) UpdateUserInfo(ctx context.Context, req *chat.UpdateUserInfoRe
 }
 
 func (o *chatSvr) FindUserPublicInfo(ctx context.Context, req *chat.FindUserPublicInfoReq) (*chat.FindUserPublicInfoResp, error) {
+	userID, userType, err := mctx.Check(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if len(req.UserIDs) == 0 {
 		return nil, errs.ErrArgs.WrapMsg("UserIDs is empty")
 	}
@@ -199,9 +203,9 @@ func (o *chatSvr) FindUserPublicInfo(ctx context.Context, req *chat.FindUserPubl
 	if err != nil {
 		return nil, err
 	}
-	return &chat.FindUserPublicInfoResp{
-		Users: DbToPbAttributes(attributes),
-	}, nil
+	users := DbToPbAttributes(attributes)
+	redactPublicInfoEmails(userID, userType, users)
+	return &chat.FindUserPublicInfoResp{Users: users}, nil
 }
 
 func (o *chatSvr) AddUserAccount(ctx context.Context, req *chat.AddUserAccountReq) (*chat.AddUserAccountResp, error) {
@@ -309,21 +313,22 @@ func (o *chatSvr) AddUserAccount(ctx context.Context, req *chat.AddUserAccountRe
 }
 
 func (o *chatSvr) SearchUserPublicInfo(ctx context.Context, req *chat.SearchUserPublicInfoReq) (*chat.SearchUserPublicInfoResp, error) {
-	if _, _, err := mctx.Check(ctx); err != nil {
+	userID, userType, err := mctx.Check(ctx)
+	if err != nil {
 		return nil, err
 	}
 	total, list, err := o.Database.Search(ctx, constant.FinDAllUser, req.Keyword, req.Genders, req.Pagination)
 	if err != nil {
 		return nil, err
 	}
-	return &chat.SearchUserPublicInfoResp{
-		Total: uint32(total),
-		Users: DbToPbAttributes(list),
-	}, nil
+	users := DbToPbAttributes(list)
+	redactPublicInfoEmails(userID, userType, users)
+	return &chat.SearchUserPublicInfoResp{Total: uint32(total), Users: users}, nil
 }
 
 func (o *chatSvr) FindUserFullInfo(ctx context.Context, req *chat.FindUserFullInfoReq) (*chat.FindUserFullInfoResp, error) {
-	if _, _, err := mctx.Check(ctx); err != nil {
+	userID, userType, err := mctx.Check(ctx)
+	if err != nil {
 		return nil, err
 	}
 	if len(req.UserIDs) == 0 {
@@ -333,21 +338,23 @@ func (o *chatSvr) FindUserFullInfo(ctx context.Context, req *chat.FindUserFullIn
 	if err != nil {
 		return nil, err
 	}
-	return &chat.FindUserFullInfoResp{Users: DbToPbUserFullInfos(attributes)}, nil
+	users := DbToPbUserFullInfos(attributes)
+	redactFullInfoEmails(userID, userType, users)
+	return &chat.FindUserFullInfoResp{Users: users}, nil
 }
 
 func (o *chatSvr) SearchUserFullInfo(ctx context.Context, req *chat.SearchUserFullInfoReq) (*chat.SearchUserFullInfoResp, error) {
-	if _, _, err := mctx.Check(ctx); err != nil {
+	userID, userType, err := mctx.Check(ctx)
+	if err != nil {
 		return nil, err
 	}
 	total, list, err := o.Database.Search(ctx, req.Normal, req.Keyword, req.Genders, req.Pagination)
 	if err != nil {
 		return nil, err
 	}
-	return &chat.SearchUserFullInfoResp{
-		Total: uint32(total),
-		Users: DbToPbUserFullInfos(list),
-	}, nil
+	users := DbToPbUserFullInfos(list)
+	redactFullInfoEmails(userID, userType, users)
+	return &chat.SearchUserFullInfoResp{Total: uint32(total), Users: users}, nil
 }
 
 func (o *chatSvr) FindUserAccount(ctx context.Context, req *chat.FindUserAccountReq) (*chat.FindUserAccountResp, error) {
@@ -387,17 +394,17 @@ func (o *chatSvr) FindAccountUser(ctx context.Context, req *chat.FindAccountUser
 }
 
 func (o *chatSvr) SearchUserInfo(ctx context.Context, req *chat.SearchUserInfoReq) (*chat.SearchUserInfoResp, error) {
-	if _, _, err := mctx.Check(ctx); err != nil {
+	userID, userType, err := mctx.Check(ctx)
+	if err != nil {
 		return nil, err
 	}
 	total, list, err := o.Database.SearchUser(ctx, req.Keyword, req.UserIDs, req.Genders, req.Pagination)
 	if err != nil {
 		return nil, err
 	}
-	return &chat.SearchUserInfoResp{
-		Total: uint32(total),
-		Users: DbToPbUserFullInfos(list),
-	}, nil
+	users := DbToPbUserFullInfos(list)
+	redactFullInfoEmails(userID, userType, users)
+	return &chat.SearchUserInfoResp{Total: uint32(total), Users: users}, nil
 }
 
 func (o *chatSvr) CheckUserExist(ctx context.Context, req *chat.CheckUserExistReq) (resp *chat.CheckUserExistResp, err error) {

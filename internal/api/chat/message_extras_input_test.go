@@ -177,7 +177,7 @@ func TestMessageExtrasGroupReadWorksWithRTCDisabledButRequiresMember(t *testing.
 				w.Header().Set("Content-Type", "application/json")
 				switch r.URL.Path {
 				case "/conversation/get_conversation":
-					_, _ = w.Write([]byte(`{"errCode":0,"data":{"conversation":{"ownerUserID":"qa-user","groupID":"g1"}}}`))
+					_, _ = w.Write([]byte(`{"errCode":0,"data":{"conversation":{"ownerUserID":"qa-user","conversationID":"sg_test","groupID":"g1"}}}`))
 				case "/group/get_group_members_info":
 					_, _ = w.Write([]byte(fmt.Sprintf(`{"errCode":0,"data":{"members":[{"userID":%q}]}}`, tc.member)))
 				default:

@@ -15,26 +15,31 @@ var ErrState = errors.New("通话状态已改变或已结束")
 var ErrBusy = errors.New("用户正在通话")
 
 type Member struct {
-	Identity string `json:"identity"`
-	Lease    int64  `json:"lease"`
-	LeftAt   int64  `json:"leftAt,omitempty"`
-	SID      string `json:"sid,omitempty"`
-	JoinedAt int64  `json:"joinedAt,omitempty"`
+	RetiredSIDs map[string]bool `json:"retiredSIDs,omitempty"`
+	Identity    string          `json:"identity"`
+	Lease       int64           `json:"lease"`
+	LeftAt      int64           `json:"leftAt,omitempty"`
+	SID         string          `json:"sid,omitempty"`
+	JoinedAt    int64           `json:"joinedAt,omitempty"`
 }
 type Call struct {
-	Room         string             `json:"room"`
-	Caller       string             `json:"caller"`
-	Callee       string             `json:"callee,omitempty"`
-	GroupID      string             `json:"groupID,omitempty"`
-	RequestID    string             `json:"requestID,omitempty"`
-	Status       string             `json:"status"`
-	Created      int64              `json:"created"`
-	Expires      int64              `json:"expires"`
-	Ended        int64              `json:"ended,omitempty"`
-	Members      map[string]*Member `json:"members"`
-	Participants map[string]bool    `json:"participants,omitempty"`
-	Removals     map[string]bool    `json:"removals,omitempty"`
-	MediaClosed  bool               `json:"mediaClosed,omitempty"`
+	ConnectedAt          int64              `json:"connectedAt,omitempty"`
+	DurationSeconds      *int64             `json:"durationSeconds,omitempty"`
+	ServerRecordDelivery bool               `json:"serverRecordDelivery,omitempty"`
+	Record               *RecordDelivery    `json:"recordDelivery,omitempty"`
+	Room                 string             `json:"room"`
+	Caller               string             `json:"caller"`
+	Callee               string             `json:"callee,omitempty"`
+	GroupID              string             `json:"groupID,omitempty"`
+	RequestID            string             `json:"requestID,omitempty"`
+	Status               string             `json:"status"`
+	Created              int64              `json:"created"`
+	Expires              int64              `json:"expires"`
+	Ended                int64              `json:"ended,omitempty"`
+	Members              map[string]*Member `json:"members"`
+	Participants         map[string]bool    `json:"participants,omitempty"`
+	Removals             map[string]bool    `json:"removals,omitempty"`
+	MediaClosed          bool               `json:"mediaClosed,omitempty"`
 }
 type State struct {
 	Calls map[string]*Call `json:"calls"`
@@ -77,7 +82,41 @@ func (c *Call) remove(user string) {
 	}
 	delete(c.Members, user)
 }
-func (c *Call) end(status string, now int64) { c.Status = status; c.Ended = now }
+func (c *Call) end(status string, now int64) {
+	if c.Terminal() {
+		return
+	}
+	c.Status = status
+	c.Ended = now
+	// A terminal leave is observed before disconnect grace elapses. Exclude
+	// that trailing wait; successful reconnects have already cleared LeftAt.
+	durationEnd := now
+	hasLeave := false
+	if c.GroupID == "" {
+		for _, m := range c.Members {
+			if m.LeftAt > 0 {
+				hasLeave = true
+				if m.LeftAt < durationEnd {
+					durationEnd = m.LeftAt
+				}
+			}
+		}
+	}
+	// A lease is only an authorization deadline, not evidence of when media
+	// disconnected. Preserve unknown duration rather than count the lease/grace.
+	durationKnown := !(status == "disconnected" && c.ConnectedAt > 0 && !hasLeave)
+	if durationKnown && (c.ConnectedAt > 0 || c.ServerRecordDelivery) {
+		seconds := int64(0)
+		if c.ConnectedAt > 0 && durationEnd > c.ConnectedAt {
+			seconds = (durationEnd - c.ConnectedAt) / 1000
+		}
+		c.DurationSeconds = &seconds
+	}
+
+	if c.ServerRecordDelivery && c.GroupID == "" {
+		c.Record = &RecordDelivery{EventID: "rtc-terminal:" + c.Room}
+	}
+}
 func (c *Call) migrateParticipants() {
 	if c.Participants == nil {
 		c.Participants = map[string]bool{}
@@ -212,7 +251,7 @@ func (s *State) Sweep(now int64) {
 		}
 		c.migrateParticipants()
 		if c.Terminal() {
-			if now-c.Ended > 24*60*60*1000 && c.MediaClosed {
+			if now-c.Ended > 24*60*60*1000 && c.MediaClosed && (c.Record == nil || c.Record.Delivered) {
 				delete(s.Calls, room)
 			}
 			continue

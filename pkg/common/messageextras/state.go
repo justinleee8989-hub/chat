@@ -18,6 +18,7 @@ type Request struct {
 	Revision       int64    `json:"revision"`
 }
 type Record struct {
+	Seq       int64                      `json:"seq,omitempty"`
 	Text      *string                    `json:"text,omitempty"`
 	EditedAt  int64                      `json:"editedAt,omitempty"`
 	Reactions map[string]map[string]bool `json:"reactions"`
@@ -26,9 +27,12 @@ type Record struct {
 
 var ErrPermission = errors.New("无权修改这条消息")
 var ErrConflict = errors.New("消息已被更新，请刷新后重试")
-var emojis = map[string]bool{"👍": true, "❤️": true, "😂": true, "😮": true, "😢": true, "🙏": true, "🔥": true, "🎉": true}
 
 func (r *Record) Apply(actor, author string, kind int32, req Request, now int64) error {
+	return r.ApplyWithPolicy(actor, author, kind, req, now, nil)
+}
+
+func (r *Record) ApplyWithPolicy(actor, author string, kind int32, req Request, now int64, policy *ReactionPolicy) error {
 	if actor == "" || kind >= 1000 {
 		return ErrPermission
 	}
@@ -46,7 +50,7 @@ func (r *Record) Apply(actor, author string, kind int32, req Request, now int64)
 		r.Text = &req.Text
 		r.EditedAt = now
 	case "react":
-		if !emojis[req.Emoji] {
+		if !policy.allows(req.Emoji) && (req.Enabled || !r.Reactions[req.Emoji][actor]) {
 			return errors.New("不支持的表情")
 		}
 		if r.Reactions == nil {

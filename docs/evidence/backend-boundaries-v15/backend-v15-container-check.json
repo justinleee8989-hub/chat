@@ -1,0 +1,11 @@
+{
+  "chat": {
+    "id": "307b60680c0f6d05e83f1b47e1c2b37e4dbf1644738b2e9f8c1a7dc6fc3a98a7",
+    "image": "local/openim-chat:v1.8.4-patch.5-backend-boundaries-v15",
+    "health": "healthy",
+    "state": "running"
+  },
+  "otherIDChanges": [],
+  "added": [],
+  "missing": []
+}

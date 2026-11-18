@@ -40,7 +40,18 @@ func (o *Api) MessageExtras(c *gin.Context) {
 			return
 		}
 	}
-	result, err := o.messageExtras(c, actor, req)
+	requestCtx := c.Request.Context()
+	if req.Action == "get" {
+		var cancel context.CancelFunc
+		requestCtx, cancel = context.WithTimeout(requestCtx, 9*time.Second)
+		defer cancel()
+		if err := acquireProgressSlot(requestCtx, extrasSlots); err != nil {
+			apiresp.GinError(c, errs.ErrInternalServer.WrapMsg("消息增强查询繁忙，请稍后重试"))
+			return
+		}
+		defer func() { <-extrasSlots }()
+	}
+	result, err := o.messageExtras(requestCtx, actor, req)
 	if err != nil {
 		apiresp.GinError(c, errs.ErrNoPermission.WrapMsg(err.Error()))
 		return
@@ -51,7 +62,8 @@ func (o *Api) messageExtras(ctx context.Context, actor string, req messageextras
 	if o.extrasRedis == nil {
 		return nil, errors.New("消息增强服务未启用")
 	}
-	ctx = rtcOperationContext(ctx)
+	ctx, cancel := context.WithTimeout(rtcOperationContext(ctx), 9*time.Second)
+	defer cancel()
 	token, err := o.imApiCaller.ImAdminTokenWithDefaultAdmin(ctx)
 	if err != nil {
 		return nil, err
@@ -61,7 +73,7 @@ func (o *Api) messageExtras(ctx context.Context, actor string, req messageextras
 	if err != nil {
 		return nil, err
 	}
-	if conv.Conversation == nil || conv.Conversation.OwnerUserID != actor {
+	if conv.Conversation == nil || conv.Conversation.OwnerUserID != actor || conv.Conversation.ConversationID != req.ConversationID {
 		return nil, messageextras.ErrPermission
 	}
 	if gid := conv.Conversation.GroupID; gid != "" {
@@ -83,13 +95,17 @@ func (o *Api) messageExtras(ctx context.Context, actor string, req messageextras
 		for i, val := range values {
 			if val != nil {
 				var record messageextras.Record
-				if err = json.Unmarshal([]byte(val.(string)), &record); err != nil {
+				raw, ok := val.(string)
+				if !ok {
+					return nil, errors.New("invalid message metadata")
+				}
+				if err = json.Unmarshal([]byte(raw), &record); err != nil {
 					return nil, err
 				}
 				result[req.MessageIDs[i]] = &record
 			}
 		}
-		return result, nil
+		return o.visibleExtraRecords(ctx, actor, req.ConversationID, conv.Conversation.MinSeq, conv.Conversation.MaxSeq, result)
 	}
 	if req.MessageID == "" || req.Seq < 1 {
 		return nil, errors.New("消息尚未同步，请稍后重试")
@@ -121,9 +137,10 @@ func (o *Api) messageExtras(ctx context.Context, actor string, req messageextras
 					return e
 				}
 			}
-			if e = record.Apply(actor, original.SendID, original.ContentType, req, time.Now().UnixMilli()); e != nil {
+			if e = record.ApplyWithPolicy(actor, original.SendID, original.ContentType, req, time.Now().UnixMilli(), o.reactionPolicy); e != nil {
 				return e
 			}
+			record.Seq = original.Seq
 			data, e := json.Marshal(record)
 			if e != nil {
 				return e

@@ -1,0 +1,10 @@
+{
+  "testCasesIncludingSubtests": 127,
+  "race": "passed",
+  "vet": "passed",
+  "patchCheck": "passed",
+  "build": "linux/arm64",
+  "chatImage": "local/openim-chat:v1.8.4-patch.5-backend-boundaries-v15",
+  "frontendChanged": false,
+  "originalExperienceDataTouched": false
+}

@@ -15,6 +15,7 @@
 package chat
 
 import (
+	"github.com/openimsdk/chat/pkg/common/messageextras"
 	"github.com/redis/go-redis/v9"
 	"io"
 	"sync"
@@ -47,9 +48,10 @@ func New(chatClient chatpb.ChatClient, adminClient admin.AdminClient, imApiCalle
 }
 
 type Api struct {
-	extrasRedis  *redis.Client
-	extrasIMURL  string
-	rtcAuthority *rtcauthority.Service
+	reactionPolicy *messageextras.ReactionPolicy
+	extrasRedis    *redis.Client
+	extrasIMURL    string
+	rtcAuthority   *rtcauthority.Service
 	// Group read progress push (group_read_webhook.go); the limiter is replaced in tests.
 	groupReadLimiter      groupReadLimiter
 	groupReadDisabledOnce sync.Once
@@ -278,6 +280,34 @@ func (o *Api) FindUserPublicInfo(c *gin.Context) {
 
 func (o *Api) FindUserFullInfo(c *gin.Context) {
 	a2r.Call(c, chatpb.ChatClient.FindUserFullInfo, o.chatClient)
+}
+
+type selfProfileResponse struct {
+	UserID string `json:"userID"`
+	Email  string `json:"email"`
+}
+
+// FindSelfProfile reads only the authenticated user's profile. The actor ID is
+// taken from the verified token context; request bodies cannot select another user.
+func (o *Api) FindSelfProfile(c *gin.Context) {
+	actor, _, err := mctx.Check(c)
+	if err != nil {
+		apiresp.GinError(c, err)
+		return
+	}
+	resp, err := o.chatClient.FindUserFullInfo(c, &chatpb.FindUserFullInfoReq{UserIDs: []string{actor}})
+	if err != nil {
+		apiresp.GinError(c, err)
+		return
+	}
+	result := selfProfileResponse{UserID: actor}
+	for _, user := range resp.Users {
+		if user != nil && user.UserID == actor {
+			result.Email = user.Email
+			break
+		}
+	}
+	apiresp.GinSuccess(c, result)
 }
 
 func (o *Api) SearchUserFullInfo(c *gin.Context) {

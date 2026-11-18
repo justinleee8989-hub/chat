@@ -9,13 +9,11 @@ import (
 	"github.com/openimsdk/chat/pkg/common/rtcauthority"
 	"github.com/openimsdk/protocol/conversation"
 	"github.com/openimsdk/protocol/group"
-	"github.com/openimsdk/protocol/msg"
 	"github.com/openimsdk/protocol/sdkws"
 	"github.com/openimsdk/tools/apiresp"
 	"github.com/openimsdk/tools/errs"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -49,7 +47,12 @@ func (o *Api) MessageReaders(c *gin.Context) {
 		apiresp.GinError(c, errs.ErrArgs)
 		return
 	}
-	result, err := o.groupMessageReaders(c, actor, req)
+	if !readersAdmission.enter(actor) {
+		apiresp.GinError(c, errs.ErrInternalServer.WrapMsg("已读明细查询繁忙，请稍后重试"))
+		return
+	}
+	defer readersAdmission.leave(actor)
+	result, err := o.groupMessageReaders(c.Request.Context(), actor, req)
 	if err != nil {
 		if errors.Is(err, rtcauthority.ErrPermission) {
 			apiresp.GinError(c, errs.ErrNoPermission.WrapMsg("无权查看该群消息的已读明细"))
@@ -131,44 +134,10 @@ func (o *Api) groupMessageReaders(ctx context.Context, actor string, req message
 			return nil, errors.New("群成员列表不完整，请重试")
 		}
 	}
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-	var firstErr error
-	jobs := make(chan int)
-	for n := 0; n < 8; n++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for i := range jobs {
-				progress, e := imapi.NewApiCaller[msg.GetConversationsHasReadAndMaxSeqReq, msg.GetConversationsHasReadAndMaxSeqResp]("/msg/get_conversations_has_read_and_max_seq").Call(ctx, o.extrasIMURL, &msg.GetConversationsHasReadAndMaxSeqReq{UserID: result.Members[i].UserID, ConversationIDs: []string{req.ConversationID}})
-				if e != nil {
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = e
-					}
-					mu.Unlock()
-					continue
-				}
-				if seq := progress.Seqs[req.ConversationID]; seq != nil {
-					result.Members[i].Read = seq.HasReadSeq >= req.Seq
-				} else {
-					mu.Lock()
-					if firstErr == nil {
-						firstErr = errors.New("已读进度响应不完整，请重试")
-					}
-					mu.Unlock()
-				}
-			}
-		}()
+	if err = o.loadReaderProgress(ctx, req.ConversationID, req.Seq, result.Members); err != nil {
+		return nil, err
 	}
-	for i := range result.Members {
-		jobs <- i
-	}
-	close(jobs)
-	wg.Wait()
-	if firstErr != nil {
-		return nil, firstErr
-	}
+
 	for _, m := range result.Members {
 		if m.Read {
 			result.ReadCount++

@@ -2,11 +2,13 @@ package chat
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/openimsdk/chat/pkg/common/imapi"
 	"github.com/openimsdk/chat/pkg/common/mctx"
+	"github.com/openimsdk/chat/pkg/common/messageextras"
 	"github.com/openimsdk/chat/pkg/common/rtcauthority"
 	"github.com/openimsdk/protocol/constant"
 	"github.com/openimsdk/protocol/group"
@@ -22,6 +24,17 @@ import (
 const rtcMaxBodyBytes int64 = 16 << 10
 
 func (o *Api) initRTC(ctx context.Context, imURL string) error {
+	if raw, present := os.LookupEnv("MESSAGE_REACTION_CHOICES"); present {
+		var choices []string
+		if err := json.Unmarshal([]byte(raw), &choices); err != nil {
+			return errors.New("MESSAGE_REACTION_CHOICES must be a JSON string array")
+		}
+		policy, err := messageextras.NewReactionPolicy(choices)
+		if err != nil {
+			return err
+		}
+		o.reactionPolicy = policy
+	}
 	rtcEnabled := os.Getenv("RTC_ENABLED") == "true"
 	extrasAddr, extrasPassword := os.Getenv("MESSAGE_EXTRAS_REDIS_ADDR"), os.Getenv("MESSAGE_EXTRAS_REDIS_PASSWORD")
 	if extrasAddr == "" {
@@ -77,6 +90,9 @@ func (o *Api) initRTC(ctx context.Context, imURL string) error {
 	}
 	svc.GroupMember = func(ctx context.Context, gid, user string) error {
 		return checkMessageExtrasGroupMember(ctx, imURL, o.imApiCaller, gid, user)
+	}
+	svc.SendRecord = func(ctx context.Context, record rtcauthority.TerminalRecord) error {
+		return o.sendRTCRecord(ctx, imURL, record)
 	}
 	o.rtcAuthority = svc
 	go svc.Run(ctx)
