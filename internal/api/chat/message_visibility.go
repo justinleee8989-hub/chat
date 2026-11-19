@@ -129,7 +129,7 @@ func (o *Api) visibleExtraRecords(ctx context.Context, actor, conversationID str
 	}
 	for pages := 0; len(unknown) > 0 && end >= lower; pages++ {
 		if pages >= 8 {
-			return nil, errors.New("旧消息索引正在补齐，请稍后重试")
+			return nil, errIndexBackfill
 		}
 		begin := max(lower, end-499)
 		page, err := pull(begin, end)

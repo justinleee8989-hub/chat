@@ -250,7 +250,7 @@ func TestHistoryGroupMembershipPrecedesConversationLookup(t *testing.T) {
 		name   string
 		broken bool
 		want   int
-	}{{"outsider without conversation", false, 1002}, {"membership upstream failure", true, 500}} {
+	}{{"outsider without conversation", false, 1002}, {"membership upstream failure", true, 20202}} {
 		t.Run(tc.name, func(t *testing.T) {
 			lookups := 0
 			upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

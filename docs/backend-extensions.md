@@ -21,7 +21,22 @@
 
 ## 通话协议
 
-保留文本前缀 `[OpenIM 呼叫] `，它是旧传输标识，不作为页面展示文案。无version的旧消息和version=2记录继续兼容。服务端仍发version=2，eventID/room用于去重，缺失时长不推算。`rtcauthority.TerminalRecord`为协议Record别名；OpenIM消息发送适配器仅负责路由与序列化，不重复拼接格式。无版本旧记录重新编码仍省略version。前端解析和UI未修改。
+保留文本前缀 `[OpenIM 呼叫] `（代码中标记 `i18n-ignore`），它是旧传输标识，不作为页面展示文案。无version的旧消息和version=2记录继续兼容。服务端仍发version=2，eventID/room用于去重，缺失时长不推算。`rtcauthority.TerminalRecord`为协议Record别名；OpenIM消息发送适配器仅负责路由与序列化，不重复拼接格式。无版本旧记录重新编码仍省略version。前端解析和UI未修改。
+
+## 错误码（2026-11-19）
+
+接口只用错误码说明失败，不返回给用户看的文字；用户看到的文案由 App 按自己的语言决定，`errDlt` 只放英文详情供日志查看，上游服务的内部详情一律换成固定说明，不透传给客户端。错误码一经使用不改含义，含义变了用新码。扩展接口（通话、消息增强、群已读、历史搜索）的失败按 `pkg/eerrs/predefine.go` 与 `internal/api/chat/error_codes.go` 映射：
+
+| 码 | 名称 | 含义 |
+| --- | --- | --- |
+| 20201 | FeatureDisabled | 本服务器未开通通话、消息增强或群已读 |
+| 20202 | RetryLater | 繁忙或尚未就绪，同一请求稍后可能成功 |
+| 20203 | CallBusy | 对方正在其他通话中 |
+| 20204 | CallEnded | 通话状态已改变或已结束 |
+| 20205 | MessageConflict | 消息在客户端读取后已被修改 |
+| 20206 | ReadReceiptLimit | 群成员过多，不提供逐人已读明细 |
+
+参数问题仍为 1001 ArgsError，无权限仍为 1002 NoPermissionError，其他失败为 500。领域包（`rtcauthority`、`messageextras`）的哨兵错误保持普通 Go 错误，`errors.Is` 按原值判断；只有 HTTP 层把它们转成错误码。
 
 ## 表情策略
 

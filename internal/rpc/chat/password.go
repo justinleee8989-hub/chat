@@ -17,6 +17,7 @@ package chat
 import (
 	"context"
 
+	"github.com/openimsdk/chat/pkg/eerrs"
 	"github.com/openimsdk/tools/errs"
 
 	"github.com/openimsdk/chat/pkg/common/constant"
@@ -93,7 +94,7 @@ func (o *chatSvr) ChangePassword(ctx context.Context, req *chat.ChangePasswordRe
 	}
 	if userType != constant.AdminUser {
 		if user.Password != req.CurrentPassword {
-			return nil, errs.ErrNoPermission.WrapMsg("current password is wrong")
+			return nil, eerrs.ErrPassword.WrapMsg("current password is wrong")
 		}
 	}
 	if user.Password != req.NewPassword {

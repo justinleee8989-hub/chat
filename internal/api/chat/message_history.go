@@ -19,6 +19,7 @@ import (
 	"github.com/openimsdk/chat/pkg/common/mctx"
 	"github.com/openimsdk/chat/pkg/common/messageextras"
 	"github.com/openimsdk/chat/pkg/common/rtcauthority"
+	"github.com/openimsdk/chat/pkg/eerrs"
 	"github.com/openimsdk/protocol/conversation"
 	"github.com/openimsdk/protocol/msg"
 	"github.com/openimsdk/protocol/sdkws"
@@ -117,7 +118,7 @@ func (o *Api) MessageHistory(c *gin.Context) {
 		return
 	}
 	if !enterHistory(actor) {
-		apiresp.GinError(c, errs.ErrInternalServer.WrapMsg("历史搜索繁忙，请稍后重试"))
+		apiresp.GinError(c, eerrs.ErrRetryLater.WrapMsg("history search busy"))
 		return
 	}
 	defer leaveHistory(actor)
@@ -128,7 +129,7 @@ func (o *Api) MessageHistory(c *gin.Context) {
 		} else if errors.Is(err, errs.ErrArgs) {
 			apiresp.GinError(c, errs.ErrArgs)
 		} else {
-			apiresp.GinError(c, errs.ErrInternalServer.WrapMsg("历史搜索暂时不可用，请重试"))
+			apiresp.GinError(c, eerrs.ErrRetryLater.WrapMsg("history search unavailable"))
 		}
 		return
 	}

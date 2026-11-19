@@ -2,7 +2,6 @@ package rtcauthority
 
 import (
 	"context"
-	"errors"
 	"github.com/google/uuid"
 	"github.com/livekit/protocol/auth"
 	"sort"
@@ -58,7 +57,7 @@ func (s *Service) Execute(ctx context.Context, user string, req Request) ([]*Cal
 	}
 	if req.Action == "create" {
 		if _, err := uuid.Parse(req.RequestID); err != nil {
-			return nil, errors.New("缺少有效请求编号")
+			return nil, ErrRequestID
 		}
 		if req.GroupID != "" {
 			if req.Peer != "" {

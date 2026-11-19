@@ -10,6 +10,7 @@ import (
 	"github.com/openimsdk/chat/pkg/common/mctx"
 	"github.com/openimsdk/chat/pkg/common/messageextras"
 	"github.com/openimsdk/chat/pkg/common/rtcauthority"
+	"github.com/openimsdk/chat/pkg/eerrs"
 	"github.com/openimsdk/protocol/constant"
 	"github.com/openimsdk/protocol/group"
 	"github.com/openimsdk/protocol/user"
@@ -144,18 +145,18 @@ func (o *Api) RTCCall(c *gin.Context) {
 		return
 	}
 	if o.rtcAuthority == nil {
-		apiresp.GinError(c, errs.ErrNoPermission.WrapMsg("通话服务未启用"))
+		apiresp.GinError(c, eerrs.ErrFeatureDisabled.WrapMsg("call service disabled"))
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, rtcMaxBodyBytes)
 	var req rtcauthority.Request
 	if err = c.ShouldBindJSON(&req); err != nil || validateRTCRequest(req) != nil {
-		apiresp.GinError(c, errs.ErrArgs.WrapMsg("请求格式错误"))
+		apiresp.GinError(c, errs.ErrArgs.WrapMsg("invalid call request"))
 		return
 	}
 	result, err := o.rtcAuthority.Execute(c, user, req)
 	if err != nil {
-		apiresp.GinError(c, errs.ErrNoPermission.WrapMsg(err.Error()))
+		apiresp.GinError(c, rtcError(err))
 		return
 	}
 	apiresp.GinSuccess(c, map[string]any{"calls": result})
@@ -167,7 +168,7 @@ func (o *Api) RTCToken(c *gin.Context) {
 		return
 	}
 	if o.rtcAuthority == nil {
-		apiresp.GinError(c, errs.ErrNoPermission.WrapMsg("通话服务未启用"))
+		apiresp.GinError(c, eerrs.ErrFeatureDisabled.WrapMsg("call service disabled"))
 		return
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, rtcMaxBodyBytes)
@@ -175,12 +176,12 @@ func (o *Api) RTCToken(c *gin.Context) {
 		Room string `json:"room"`
 	}
 	if err = c.ShouldBindJSON(&req); err != nil || validateRTCRequest(rtcauthority.Request{Action: "token", Room: req.Room}) != nil {
-		apiresp.GinError(c, errs.ErrArgs.WrapMsg("请求格式错误"))
+		apiresp.GinError(c, errs.ErrArgs.WrapMsg("invalid call request"))
 		return
 	}
 	token, err := o.rtcAuthority.Token(c, req.Room, user)
 	if err != nil {
-		apiresp.GinError(c, errs.ErrNoPermission.WrapMsg(err.Error()))
+		apiresp.GinError(c, rtcError(err))
 		return
 	}
 	apiresp.GinSuccess(c, map[string]string{"token": token, "serverUrl": o.rtcAuthority.PublicURL})

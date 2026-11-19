@@ -90,7 +90,7 @@ func TestMessageExtrasConcurrentReadsBySameActorQueueInsteadOfReject(t *testing.
 			close(releaseFirst)
 			<-firstDone
 			got := <-secondDone
-			if strings.Contains(got.Body.String(), "繁忙") {
+			if strings.Contains(got.Body.String(), `"errCode":20202`) {
 				t.Fatalf("concurrent same-actor read rejected as busy: %s", got.Body.String())
 			}
 			t.Fatal("second upstream request was not admitted while first was in flight")
@@ -101,7 +101,7 @@ func TestMessageExtrasConcurrentReadsBySameActorQueueInsteadOfReject(t *testing.
 	for i, result := range []<-chan *httptest.ResponseRecorder{firstDone, secondDone} {
 		select {
 		case recorder := <-result:
-			if strings.Contains(recorder.Body.String(), "繁忙") {
+			if strings.Contains(recorder.Body.String(), `"errCode":20202`) {
 				t.Fatalf("request %d rejected as busy: %s", i+1, recorder.Body.String())
 			}
 		case <-time.After(2 * time.Second):
@@ -147,7 +147,7 @@ func TestMessageExtrasSaturatedSlotsHonorRequestCancellation(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("request did not return after its context was canceled")
 	}
-	if !strings.Contains(recorder.Body.String(), "繁忙") {
+	if !strings.Contains(recorder.Body.String(), `"errCode":20202`) {
 		t.Fatalf("canceled waiter response=%s, want admission timeout", recorder.Body.String())
 	}
 	if got := len(extrasSlots); got != cap(extrasSlots) {

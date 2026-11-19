@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"errors"
 	"github.com/openimsdk/chat/pkg/common/imapi"
 	"github.com/openimsdk/protocol/msg"
 	"sync"
@@ -34,7 +33,7 @@ func (o *Api) loadReaderProgress(ctx context.Context, conversationID string, seq
 					return
 				}
 				if progress == nil || progress.Seqs[conversationID] == nil {
-					fail(errors.New("已读进度响应不完整，请重试"))
+					fail(errReadProgressIncomplete)
 					return
 				}
 				members[i].Read = progress.Seqs[conversationID].HasReadSeq >= seq

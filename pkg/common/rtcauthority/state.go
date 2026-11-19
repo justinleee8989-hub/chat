@@ -10,9 +10,12 @@ const RingMS int64 = 45000
 const LeaseMS int64 = 35000
 const DisconnectGraceMS int64 = 15000
 
-var ErrPermission = errors.New("无权操作此通话")
-var ErrState = errors.New("通话状态已改变或已结束")
-var ErrBusy = errors.New("用户正在通话")
+var ErrPermission = errors.New("call permission denied")
+var ErrState = errors.New("call state changed or ended")
+var ErrBusy = errors.New("user is in another call")
+var ErrCapacity = errors.New("call record capacity reached")
+var ErrStoreBusy = errors.New("call state store busy")
+var ErrRequestID = errors.New("missing a valid request ID")
 
 type Member struct {
 	RetiredSIDs map[string]bool `json:"retiredSIDs,omitempty"`
@@ -148,7 +151,7 @@ func (s *State) Create(room, caller, callee, groupID string, now int64) (*Call, 
 		return nil, ErrBusy
 	}
 	if len(s.Calls) >= 4096 {
-		return nil, errors.New("通话记录容量已满，请稍后重试")
+		return nil, ErrCapacity
 	}
 	participants := map[string]bool{caller: true}
 	if callee != "" {

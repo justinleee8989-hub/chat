@@ -63,7 +63,7 @@ func (s *Store) Update(ctx context.Context, apply func(*State) error) error {
 			return err
 		}
 	}
-	return errors.New("通话状态繁忙，请重试")
+	return ErrStoreBusy
 }
 
 // View returns a detached snapshot; it never renews a lease or writes Redis.

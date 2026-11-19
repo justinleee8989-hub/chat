@@ -10,6 +10,7 @@ import (
 	"github.com/openimsdk/chat/pkg/common/imapi"
 	"github.com/openimsdk/chat/pkg/common/mctx"
 	"github.com/openimsdk/chat/pkg/common/messageextras"
+	"github.com/openimsdk/chat/pkg/eerrs"
 	"github.com/openimsdk/protocol/conversation"
 	"github.com/openimsdk/protocol/sdkws"
 	"github.com/openimsdk/tools/apiresp"
@@ -46,21 +47,21 @@ func (o *Api) MessageExtras(c *gin.Context) {
 		requestCtx, cancel = context.WithTimeout(requestCtx, 9*time.Second)
 		defer cancel()
 		if err := acquireProgressSlot(requestCtx, extrasSlots); err != nil {
-			apiresp.GinError(c, errs.ErrInternalServer.WrapMsg("消息增强查询繁忙，请稍后重试"))
+			apiresp.GinError(c, eerrs.ErrRetryLater.WrapMsg("message extras busy"))
 			return
 		}
 		defer func() { <-extrasSlots }()
 	}
 	result, err := o.messageExtras(requestCtx, actor, req)
 	if err != nil {
-		apiresp.GinError(c, errs.ErrNoPermission.WrapMsg(err.Error()))
+		apiresp.GinError(c, extrasError(err))
 		return
 	}
 	apiresp.GinSuccess(c, map[string]any{"records": result})
 }
 func (o *Api) messageExtras(ctx context.Context, actor string, req messageextras.Request) (map[string]*messageextras.Record, error) {
 	if o.extrasRedis == nil {
-		return nil, errors.New("消息增强服务未启用")
+		return nil, errExtrasDisabled
 	}
 	ctx, cancel := context.WithTimeout(rtcOperationContext(ctx), 9*time.Second)
 	defer cancel()
@@ -108,7 +109,7 @@ func (o *Api) messageExtras(ctx context.Context, actor string, req messageextras
 		return o.visibleExtraRecords(ctx, actor, req.ConversationID, conv.Conversation.MinSeq, conv.Conversation.MaxSeq, result)
 	}
 	if req.MessageID == "" || req.Seq < 1 {
-		return nil, errors.New("消息尚未同步，请稍后重试")
+		return nil, errMessageNotSynced
 	}
 	source, err := imapi.NewApiCaller[sdkws.PullMessageBySeqsReq, sdkws.PullMessageBySeqsResp]("/msg/pull_msg_by_seq").Call(ctx, o.extrasIMURL, &sdkws.PullMessageBySeqsReq{UserID: actor, SeqRanges: []*sdkws.SeqRange{{ConversationID: req.ConversationID, Begin: req.Seq, End: req.Seq, Num: 1}}})
 	if err != nil {

@@ -2,11 +2,11 @@ package chat
 
 import (
 	"context"
-	"errors"
 	"github.com/gin-gonic/gin"
 	"github.com/openimsdk/chat/pkg/common/imapi"
 	"github.com/openimsdk/chat/pkg/common/mctx"
 	"github.com/openimsdk/chat/pkg/common/rtcauthority"
+	"github.com/openimsdk/chat/pkg/eerrs"
 	"github.com/openimsdk/protocol/conversation"
 	"github.com/openimsdk/protocol/group"
 	"github.com/openimsdk/protocol/sdkws"
@@ -48,17 +48,13 @@ func (o *Api) MessageReaders(c *gin.Context) {
 		return
 	}
 	if !readersAdmission.enter(actor) {
-		apiresp.GinError(c, errs.ErrInternalServer.WrapMsg("已读明细查询繁忙，请稍后重试"))
+		apiresp.GinError(c, eerrs.ErrRetryLater.WrapMsg("read details busy"))
 		return
 	}
 	defer readersAdmission.leave(actor)
 	result, err := o.groupMessageReaders(c.Request.Context(), actor, req)
 	if err != nil {
-		if errors.Is(err, rtcauthority.ErrPermission) {
-			apiresp.GinError(c, errs.ErrNoPermission.WrapMsg("无权查看该群消息的已读明细"))
-		} else {
-			apiresp.GinError(c, errs.ErrInternalServer.WrapMsg("已读明细暂时不可用，请稍后重试"))
-		}
+		apiresp.GinError(c, readersError(err))
 		return
 	}
 	apiresp.GinSuccess(c, result)
@@ -66,7 +62,7 @@ func (o *Api) MessageReaders(c *gin.Context) {
 
 func (o *Api) groupMessageReaders(ctx context.Context, actor string, req messageReadersRequest) (*messageReadersResponse, error) {
 	if o.extrasIMURL == "" {
-		return nil, errors.New("群已读服务未启用")
+		return nil, errReadersDisabled
 	}
 	ctx, cancel := context.WithTimeout(rtcOperationContext(ctx), 25*time.Second)
 	defer cancel()
@@ -114,7 +110,7 @@ func (o *Api) groupMessageReaders(ctx context.Context, actor string, req message
 			return nil, e
 		}
 		if members.Total > 2000 || page > 20 {
-			return nil, errors.New("当前明细最多支持2000名群成员")
+			return nil, errReaderLimit
 		}
 		for _, m := range members.Members {
 			if m.UserID == actor || seen[m.UserID] {
@@ -131,7 +127,7 @@ func (o *Api) groupMessageReaders(ctx context.Context, actor string, req message
 			break
 		}
 		if len(members.Members) == 0 {
-			return nil, errors.New("群成员列表不完整，请重试")
+			return nil, errMemberListIncomplete
 		}
 	}
 	if err = o.loadReaderProgress(ctx, req.ConversationID, req.Seq, result.Members); err != nil {

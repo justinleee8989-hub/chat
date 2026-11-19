@@ -25,8 +25,11 @@ type Record struct {
 	Revision  int64                      `json:"revision"`
 }
 
-var ErrPermission = errors.New("无权修改这条消息")
-var ErrConflict = errors.New("消息已被更新，请刷新后重试")
+var ErrPermission = errors.New("no permission to change this message")
+var ErrConflict = errors.New("message changed since it was read")
+
+// ErrInvalid: an edit or reaction the server does not accept (empty or too long text, an emoji or action it does not know).
+var ErrInvalid = errors.New("invalid message edit or reaction")
 
 func (r *Record) Apply(actor, author string, kind int32, req Request, now int64) error {
 	return r.ApplyWithPolicy(actor, author, kind, req, now, nil)
@@ -42,7 +45,7 @@ func (r *Record) ApplyWithPolicy(actor, author string, kind int32, req Request, 
 			return ErrPermission
 		}
 		if strings.TrimSpace(req.Text) == "" || utf8.RuneCountInString(req.Text) > 10000 {
-			return errors.New("消息文字不能为空或过长")
+			return ErrInvalid
 		}
 		if req.Revision != r.Revision {
 			return ErrConflict
@@ -51,7 +54,7 @@ func (r *Record) ApplyWithPolicy(actor, author string, kind int32, req Request, 
 		r.EditedAt = now
 	case "react":
 		if !policy.allows(req.Emoji) && (req.Enabled || !r.Reactions[req.Emoji][actor]) {
-			return errors.New("不支持的表情")
+			return ErrInvalid
 		}
 		if r.Reactions == nil {
 			r.Reactions = map[string]map[string]bool{}
@@ -68,7 +71,7 @@ func (r *Record) ApplyWithPolicy(actor, author string, kind int32, req Request, 
 			delete(r.Reactions, req.Emoji)
 		}
 	default:
-		return errors.New("不支持的操作")
+		return ErrInvalid
 	}
 	r.Revision++
 	return nil

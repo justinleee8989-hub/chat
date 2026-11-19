@@ -33,4 +33,13 @@ var (
 	ErrEmailAlreadyRegister     = errs.NewCodeError(20014, "EmailAlreadyRegister")
 
 	ErrTokenNotExist = errs.NewCodeError(20101, "ErrTokenNotExist")
+
+	// Codes the app tells apart: each is one thing for the user to know, put into words by the app
+	// in its own language. A code keeps its meaning once used; a new meaning takes a new code.
+	ErrFeatureDisabled  = errs.NewCodeError(20201, "FeatureDisabled")  // calls, message extras or read receipts are not set up on this server
+	ErrRetryLater       = errs.NewCodeError(20202, "RetryLater")       // busy or not ready yet; the same request may work shortly
+	ErrCallBusy         = errs.NewCodeError(20203, "CallBusy")         // the other user is in another call
+	ErrCallEnded        = errs.NewCodeError(20204, "CallEnded")        // the call changed state or ended meanwhile
+	ErrMessageConflict  = errs.NewCodeError(20205, "MessageConflict")  // the message was changed since the client read it
+	ErrReadReceiptLimit = errs.NewCodeError(20206, "ReadReceiptLimit") // the group is too large for per-member read details
 )

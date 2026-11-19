@@ -14,6 +14,7 @@ import (
 	chatconstant "github.com/openimsdk/chat/pkg/common/constant"
 	"github.com/openimsdk/chat/pkg/common/mctx"
 	"github.com/openimsdk/chat/pkg/common/rtcauthority"
+	"github.com/openimsdk/chat/pkg/eerrs"
 	"github.com/openimsdk/protocol/sdkws"
 	"github.com/openimsdk/tools/apiresp"
 	"github.com/openimsdk/tools/errs"
@@ -147,7 +148,7 @@ func TestMessageReadersHandlerEnforcesFourKiBBodyLimit(t *testing.T) {
 		size int
 		code int
 	}{
-		{name: "at limit accepted", size: messageReadersBodyLimit, code: errs.ErrInternalServer.Code()},
+		{name: "at limit accepted", size: messageReadersBodyLimit, code: eerrs.ErrFeatureDisabled.Code()},
 		{name: "over limit rejected", size: messageReadersBodyLimit + 1, code: errs.ErrArgs.Code()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -178,7 +179,7 @@ func TestMessageReadersHandlerSeparatesPermissionFromUpstreamFailure(t *testing.
 		{
 			name:     "upstream unavailable",
 			cause:    errors.New("upstream private error detail"),
-			wantCode: errs.ErrInternalServer.Code(),
+			wantCode: eerrs.ErrRetryLater.Code(),
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
