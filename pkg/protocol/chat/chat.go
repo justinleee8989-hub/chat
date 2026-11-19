@@ -42,6 +42,16 @@ func (x *FindUserPublicInfoReq) Check() error {
 	return nil
 }
 
+func (x *FindUserByContactReq) Check() error {
+	if (x.Email == "") == (x.PhoneNumber == "") {
+		return errs.ErrArgs.WrapMsg("set either email or phoneNumber")
+	}
+	if x.PhoneNumber != "" && x.AreaCode == "" {
+		return errs.ErrArgs.WrapMsg("areaCode is empty")
+	}
+	return nil
+}
+
 func (x *SearchUserPublicInfoReq) Check() error {
 	if x.Pagination == nil {
 		return errs.ErrArgs.WrapMsg("pagination is empty")

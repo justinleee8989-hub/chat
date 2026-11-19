@@ -208,6 +208,41 @@ func (o *chatSvr) FindUserPublicInfo(ctx context.Context, req *chat.FindUserPubl
 	return &chat.FindUserPublicInfoResp{Users: users}, nil
 }
 
+// FindUserByContact finds the user registered with exactly this email or phone number, for a
+// signed-in user adding a friend. Only a full match is found (there is no partial search on
+// either), and the email of anyone but the caller is left out, as in FindUserPublicInfo.
+func (o *chatSvr) FindUserByContact(ctx context.Context, req *chat.FindUserByContactReq) (*chat.FindUserByContactResp, error) {
+	userID, userType, err := mctx.Check(ctx)
+	if err != nil {
+		return nil, err
+	}
+	account, kind := req.Email, constant.CredentialEmail
+	if req.PhoneNumber != "" {
+		account, kind = BuildCredentialPhone(req.AreaCode, req.PhoneNumber), constant.CredentialPhone
+	}
+	credential, err := o.Database.TakeCredentialByAccount(ctx, account)
+	if err != nil {
+		if dbutil.IsDBNotFound(err) {
+			return &chat.FindUserByContactResp{}, nil
+		}
+		return nil, err
+	}
+	// Credentials also hold account names; an "email" that is someone's account name is no match.
+	if credential.Type != kind {
+		return &chat.FindUserByContactResp{}, nil
+	}
+	attributes, err := o.Database.FindAttribute(ctx, []string{credential.UserID})
+	if err != nil {
+		return nil, err
+	}
+	users := DbToPbAttributes(attributes)
+	if len(users) == 0 {
+		return &chat.FindUserByContactResp{}, nil
+	}
+	redactPublicInfoEmails(userID, userType, users)
+	return &chat.FindUserByContactResp{User: users[0]}, nil
+}
+
 func (o *chatSvr) AddUserAccount(ctx context.Context, req *chat.AddUserAccountReq) (*chat.AddUserAccountResp, error) {
 	if _, _, err := mctx.Check(ctx); err != nil {
 		return nil, err

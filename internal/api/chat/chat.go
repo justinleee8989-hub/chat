@@ -310,6 +310,10 @@ func (o *Api) FindSelfProfile(c *gin.Context) {
 	apiresp.GinSuccess(c, result)
 }
 
+func (o *Api) FindUserByContact(c *gin.Context) {
+	a2r.Call(c, chatpb.ChatClient.FindUserByContact, o.chatClient)
+}
+
 func (o *Api) SearchUserFullInfo(c *gin.Context) {
 	a2r.Call(c, chatpb.ChatClient.SearchUserFullInfo, o.chatClient)
 }

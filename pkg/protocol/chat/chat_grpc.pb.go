@@ -37,6 +37,7 @@ const (
 	Chat_AddUserAccount_FullMethodName          = "/openim.chat.chat/AddUserAccount"
 	Chat_SearchUserPublicInfo_FullMethodName    = "/openim.chat.chat/SearchUserPublicInfo"
 	Chat_FindUserPublicInfo_FullMethodName      = "/openim.chat.chat/FindUserPublicInfo"
+	Chat_FindUserByContact_FullMethodName       = "/openim.chat.chat/FindUserByContact"
 	Chat_SearchUserFullInfo_FullMethodName      = "/openim.chat.chat/SearchUserFullInfo"
 	Chat_FindUserFullInfo_FullMethodName        = "/openim.chat.chat/FindUserFullInfo"
 	Chat_SendVerifyCode_FullMethodName          = "/openim.chat.chat/SendVerifyCode"
@@ -67,6 +68,8 @@ type ChatClient interface {
 	// Get user's public information - called by strangers
 	SearchUserPublicInfo(ctx context.Context, in *SearchUserPublicInfoReq, opts ...grpc.CallOption) (*SearchUserPublicInfoResp, error)
 	FindUserPublicInfo(ctx context.Context, in *FindUserPublicInfoReq, opts ...grpc.CallOption) (*FindUserPublicInfoResp, error)
+	// Find the user with exactly this email or phone number - for adding a friend
+	FindUserByContact(ctx context.Context, in *FindUserByContactReq, opts ...grpc.CallOption) (*FindUserByContactResp, error)
 	// Search user information - called by administrators, other users get public fields
 	SearchUserFullInfo(ctx context.Context, in *SearchUserFullInfoReq, opts ...grpc.CallOption) (*SearchUserFullInfoResp, error)
 	FindUserFullInfo(ctx context.Context, in *FindUserFullInfoReq, opts ...grpc.CallOption) (*FindUserFullInfoResp, error)
@@ -132,6 +135,16 @@ func (c *chatClient) FindUserPublicInfo(ctx context.Context, in *FindUserPublicI
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(FindUserPublicInfoResp)
 	err := c.cc.Invoke(ctx, Chat_FindUserPublicInfo_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *chatClient) FindUserByContact(ctx context.Context, in *FindUserByContactReq, opts ...grpc.CallOption) (*FindUserByContactResp, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(FindUserByContactResp)
+	err := c.cc.Invoke(ctx, Chat_FindUserByContact_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -328,6 +341,8 @@ type ChatServer interface {
 	// Get user's public information - called by strangers
 	SearchUserPublicInfo(context.Context, *SearchUserPublicInfoReq) (*SearchUserPublicInfoResp, error)
 	FindUserPublicInfo(context.Context, *FindUserPublicInfoReq) (*FindUserPublicInfoResp, error)
+	// Find the user with exactly this email or phone number - for adding a friend
+	FindUserByContact(context.Context, *FindUserByContactReq) (*FindUserByContactResp, error)
 	// Search user information - called by administrators, other users get public fields
 	SearchUserFullInfo(context.Context, *SearchUserFullInfoReq) (*SearchUserFullInfoResp, error)
 	FindUserFullInfo(context.Context, *FindUserFullInfoReq) (*FindUserFullInfoResp, error)
@@ -370,6 +385,9 @@ func (UnimplementedChatServer) SearchUserPublicInfo(context.Context, *SearchUser
 }
 func (UnimplementedChatServer) FindUserPublicInfo(context.Context, *FindUserPublicInfoReq) (*FindUserPublicInfoResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method FindUserPublicInfo not implemented")
+}
+func (UnimplementedChatServer) FindUserByContact(context.Context, *FindUserByContactReq) (*FindUserByContactResp, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method FindUserByContact not implemented")
 }
 func (UnimplementedChatServer) SearchUserFullInfo(context.Context, *SearchUserFullInfoReq) (*SearchUserFullInfoResp, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SearchUserFullInfo not implemented")
@@ -514,6 +532,24 @@ func _Chat_FindUserPublicInfo_Handler(srv interface{}, ctx context.Context, dec 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(ChatServer).FindUserPublicInfo(ctx, req.(*FindUserPublicInfoReq))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _Chat_FindUserByContact_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(FindUserByContactReq)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ChatServer).FindUserByContact(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: Chat_FindUserByContact_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ChatServer).FindUserByContact(ctx, req.(*FindUserByContactReq))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -864,6 +900,10 @@ var Chat_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "FindUserPublicInfo",
 			Handler:    _Chat_FindUserPublicInfo_Handler,
+		},
+		{
+			MethodName: "FindUserByContact",
+			Handler:    _Chat_FindUserByContact_Handler,
 		},
 		{
 			MethodName: "SearchUserFullInfo",

@@ -61,6 +61,16 @@ message FindUserPublicInfoResp {
   repeated openim.chat.common.UserPublicInfo users = 1;
 }
 
+message FindUserByContactReq {
+  string email = 1;
+  string areaCode = 2;
+  string phoneNumber = 3;
+}
+
+message FindUserByContactResp {
+  openim.chat.common.UserPublicInfo user = 1; // unset when no user has this email or phone number
+}
+
 message SearchUserPublicInfoReq {
   string keyword = 1;
   openim.sdkws.RequestPagination pagination = 2;
@@ -296,6 +306,8 @@ service chat {
   // Get user's public information - called by strangers
   rpc SearchUserPublicInfo(SearchUserPublicInfoReq) returns (SearchUserPublicInfoResp);
   rpc FindUserPublicInfo(FindUserPublicInfoReq) returns (FindUserPublicInfoResp);
+  // Find the user with exactly this email or phone number - for adding a friend
+  rpc FindUserByContact(FindUserByContactReq) returns (FindUserByContactResp);
   // Search user information - called by administrators, other users get public fields
   rpc SearchUserFullInfo(SearchUserFullInfoReq) returns (SearchUserFullInfoResp);
   rpc FindUserFullInfo(FindUserFullInfoReq) returns (FindUserFullInfoResp);
